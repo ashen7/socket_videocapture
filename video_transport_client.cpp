@@ -38,13 +38,14 @@ using cv::VideoCapture;
 
 DEFINE_int32(target_port, 8888, "what is the localhost target_port?");
 DEFINE_string(target_ip, "10.209.149.204", "what is the localhost target_ip?");
+DEFINE_string(media_path, "", "video capture pathname");
 
 struct SendBuffer {
 	char buffer[BUFFER_SIZE];
 	int is_frame_end;
 } send_frame_data;
 
-static void InitializeGlog(int argc, char* argv[]);                //初始化glog日志
+static void InitializeGlog(int argc, char* argv[]);                  //初始化glog日志
 static int RunTcpClient(int32_t target_port,const char* target_ip);  //socket客户端
 static int SendFrame(int client_socket, const cv::Mat& frame);       //发送帧给服务端
 
@@ -113,8 +114,16 @@ int RunTcpClient(int32_t target_port,const char* target_ip) {
 	client_addr.sin_port = htons(target_port);          //端口
     connect(client_socket, (struct sockaddr*)&client_addr, sizeof(struct sockaddr));
 
+    int is_local_camera = -1;
+#ifdef local_camera
 	//打开默认摄像头
     cv::VideoCapture video_capture(0);
+    is_local_camera = 1;
+#else
+	//打开本地媒体文件
+    cv::VideoCapture video_capture(FLAGS_media_path.c_str());
+    is_local_camera = 0;
+#endif
 	if (!video_capture.isOpened()) {
 		LOG(WARNING) << "打开摄像头失败!" << strerror(errno);
         return -1;
@@ -122,9 +131,12 @@ int RunTcpClient(int32_t target_port,const char* target_ip) {
     
     cv::Mat frame;
 	//3.客户端发送消息给服务端
+    //先发一条信息 是本地摄像头的帧数据还是媒体文件的帧数据
+    send(client_socket, (char*)&is_local_camera, sizeof(int), 0);
 	while (true) {
         //cap.read()读给frame 
 		video_capture >> frame;     
+        cv::resize(frame, frame, cv::Size(640, 480));
 		//给客户端发送每一帧的图像
 		if (0 != SendFrame(client_socket, frame)) {
             LOG(WARNING) << "send frame to server is fail...";
